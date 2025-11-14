@@ -1,3 +1,8 @@
+# Tensor_trains 
+using TensorTrains, TensorCast, Tullio, LogarithmicNumbers, ProgressMeter, LinearAlgebra
+using TensorTrains: compress, TruncBondThresh  
+
+
 # ============================================
 # COMPROBACIONES Y DISTRIBUCIONES MARGINALES
 # ============================================
@@ -136,4 +141,51 @@ function correlation_between_chains(B)
     covariances = covariance_between_chains(B)
     correlations = [ covariances[k] / (sqrt(1 - simple_ev[k][1]^2) * sqrt(1 - simple_ev[k][2]^2))  for k in 1:N]
     return correlations
+end
+
+function max_prod_tt(B, k1, k2)
+    k1, k2 = min(k1,k2), max(k1,k2)
+    init = 1.0
+    if k1 < k2 
+        for i in k1:k2-1
+            @tullio C[a,b] := B.tensors[i][a,b,k]
+            init = init * C
+        end
+    end
+    return init
+end
+
+function marginal_distribution(B,k)
+    N = length(B.tensors)
+    K = size(B.tensors[1], 3)
+
+    left_distribution = max_prod_tt(B, 1, k )
+    right_distribution = max_prod_tt(B, k +1, N+1) 
+
+    distribution = [(left_distribution * B.tensors[k][:,:, q, 1] * right_distribution)[1] for q in 1:K]
+    return distribution
+end
+        
+
+function marginal_distribution_second_order(B, k1, k2)
+    N = length(B.tensors)
+    k1, k2 = min(k1,k2), max(k1,k2)
+    left = max_prod_tt(B, 1, k1 )
+    middle = max_prod_tt(B, k1 + 1, k2 )
+    right = max_prod_tt(B, k2 + 1, N+1) 
+    @tullio result[a,b] := left * B.tensors[k1][:,:,a] * middle * B.tensors[k2][:,:,b] * right
+    return result
+end
+
+
+
+function covariance_between_spins_same_chain(B, k1, k2)
+    marginals = marginal_distribution_second_order(B, k1, k2)
+    simple_ev_k1 = marginal_expected_value_parallel(B, k1)
+    simple_ev_k2 = marginal_expected_value_parallel(B, k2)
+    second_moment_ch_1 = sum_dif(marginals, [2,4,1,3], [2,4,1,3])
+    second_moment_ch_2 = sum_dif(marginals, [3,4,1,2], [3,4,1,2])
+    covariance_ch_1 = second_moment_ch_1 - simple_ev_k1[1]*simple_ev_k2[1]
+    covariance_ch_2 = second_moment_ch_2 - simple_ev_k1[2]*simple_ev_k2[2]
+    return (covariance_ch_1, covariance_ch_2)
 end

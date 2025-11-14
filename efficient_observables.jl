@@ -77,8 +77,7 @@ end
 
 function marginal_ev_system(marginal_system)
     function expected(dist)
-        return ((dist[1] + dist[3]) * (-1) + (dist[2] + dist[4]) * (1),
-        (dist[1] + dist[2]) * (-1) + (dist[3] + dist[4]) * (1))
+        return ((dist[1] + dist[3]) * (-1) + (dist[2] + dist[4]) * (1), (dist[1] + dist[2]) * (-1) + (dist[3] + dist[4]) * (1))
     end
 
     expected_values = []
