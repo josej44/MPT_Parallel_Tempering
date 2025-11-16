@@ -91,7 +91,7 @@ end
     marginal_expected_value_system(B): Calcula el valor esperado marginal E[σ_k] para todos los sitios k 
     a partir del TensorTrain B que representa la distribución conjunta.
 """
-function marginal_ev_system(B)
+function marginal_ev_system_inef(B)
     N = length(B.tensors)
     expected_values = zeros(N)
     for k in 1:N

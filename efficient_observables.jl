@@ -81,8 +81,8 @@ function marginal_ev_system(marginal_system)
     end
 
     expected_values = []
-    for k in 1:N
-        push!(expected_values, expected(marginal_system[k]))
+    for marginal in marginal_system
+        push!(expected_values, expected(marginal))
     end
     return expected_values
 end
@@ -144,21 +144,28 @@ end
 """
 
 function second_moment_system(second_order_marginals_system)
-    function sum_dif(matrix, vec, vec2)
-        state = matrix[:,vec[1]] + matrix[:,vec[2]] - matrix[:,vec[3]] - matrix[:,vec[4]]
-        state2 = state[vec2[1]] + state[vec2[2]] - state[vec2[3]] - state[vec2[4]]
-        return state2[1,1]
+    function sum_dif(matrix, chain_number)
+        signs = if chain_number == 1
+            # Patrón: alterna según (i+j) par/impar
+            [(-1)^(i+j) for i in 1:4, j in 1:4]
+        else  # chain_number == 2
+            # Patrón: alterna según (i÷2 + j÷2) par/impar
+            [(-1)^(div(i-1,2) + div(j-1,2)) for i in 1:4, j in 1:4]
+        end
+        return sum(signs .* matrix)
     end
-
+            
     second_moments = []
     for k in 1:N-1
         marginals = second_order_marginals_system[k]
-        second_moment_ch_1 = sum_dif(marginals, [2,4,1,3], [2,4,1,3])
-        second_moment_ch_2 = sum_dif(marginals, [3,4,1,2], [3,4,1,2])
+        second_moment_ch_1 = sum_dif(marginals, 1)
+        second_moment_ch_2 = sum_dif(marginals, 2)
         push!(second_moments, (second_moment_ch_1, second_moment_ch_2))
     end
     return second_moments
 end
+
+
 
 
 
@@ -239,12 +246,53 @@ function system_description(B, params)
     full_correlations = correlation_between_spins_system(full_second_moments, full_expected_values)
     energy = energy_function(full_expected_values, full_second_moments, params)
 
-    return (
-        full_marginals,
-        full_second_order_marginals,
-        full_expected_values,
-        full_second_moments,
-        full_correlations,
-        energy
+
+    observables_system = (
+        full_marginals = full_marginals,
+        full_second_order_marginals = full_second_order_marginals,
+        full_expected_values = full_expected_values,
+        full_second_moments = full_second_moments,
+        full_correlations = full_correlations,
+        energy = energy
     )
+
+    return observables_system
+end
+
+
+
+
+# Just for parallel systems
+
+"""
+    system_description_over_time(B_t, params)
+Calculate all the relevant observables of the system represented by the TensorTrain B_t at different times and the system parameters params.
+Returns a tuple with:
+- full_marginals_t
+- full_second_order_marginals_t
+- full_expected_values_t
+- full_second_moments_t
+- full_correlations_t
+- energy_t
+"""
+
+function system_description_over_time(B_t, params)
+    observables_over_time = (
+        full_marginals_t = [],
+        full_second_order_marginals_t = [],
+        full_expected_values_t = [],
+        full_second_moments_t = [],
+        full_correlations_t = [],
+        energy_t = []
+    )
+    for B in B_t
+        observables = system_description(B, params)
+        push!(observables_over_time.full_marginals_t, observables.full_marginals)
+        push!(observables_over_time.full_second_order_marginals_t, observables.full_second_order_marginals)
+        push!(observables_over_time.full_expected_values_t, observables.full_expected_values)
+        push!(observables_over_time.full_second_moments_t, observables.full_second_moments)
+        push!(observables_over_time.full_correlations_t, observables.full_correlations)
+        push!(observables_over_time.energy_t, observables.energy)
+    end
+    return observables_over_time
 end

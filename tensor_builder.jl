@@ -471,12 +471,6 @@ function swapping_tt(B)
 end
 
 
-function distribution_swap(B, s)
-    B[1] = B[1] * (1-s)
-    B_swap = deepcopy(swapping_tt(B))
-    B_swap[1] = B_swap[1] * s
-    return B + B_swap
-end
 
 
 
@@ -484,7 +478,7 @@ end
 # TENSOR TRAIN DE EVOLUCIÓN DE LA DISTRIBUCIÓN DE PROBABILIDAD CON SWAP CON SALVA OPCIONAL
 # ============================================================================
 """
-    tensor_b_t_swap_v1(A, P0, t, max_bound, s, save = true) Evoluciona la distribución de probabilidad inicial P0 a través de t 
+    tensor_b_t_swap(A, P0, t, max_bound, s, save = true) Evoluciona la distribución de probabilidad inicial P0 a través de t 
     pasos de tiempo usando la matriz de transición A en formato TensorTrain, aplicando un swap con probabilidad s en cada paso.
     Devuelve una lista con el TensorTrain de la distribución en cada paso de tiempo si save es true.
 # Argumentos
@@ -497,60 +491,30 @@ end
 """
 
 function tensor_b_t_swap(A, P0, t, max_bound, s, save = true)
-    # Construye el TensorTrain inicial para la distribución P0
-    B = TensorTrain([(@tullio _[1,1,x] := pi[x]) for pi in P0])    
-    if save
-        lista_B_T = []
-        push!(lista_B_T, B)
-    end    
+    B = TensorTrain([(@tullio _[1,1,x] := pi[x]) for pi in P0])
+    lista_B_T = save ? [B] : nothing
+    swap_idx = [1, 3, 2, 4]
     
-    # Itera sobre los pasos de tiempo
-    @showprogress for _ in 1:t   
-        # Evolución con la matriz de transición
-        B = map(zip(A.tensors, B.tensors)) do (A_i, B_i)     
-            @tullio new_tensor_[m1,m2,n1,n2,sigma_t_plus] := A_i[m1,n1,sigma_t,sigma_t_plus] * B_i[m2,n2,sigma_t]
-            @cast _[(m1,m2),(n1,n2),sigma_t_plus] := new_tensor_[m1,m2,n1,n2,sigma_t_plus]
+    @showprogress for _ in 1:t
+        # Evolución temporal
+        B = map(zip(A.tensors, B.tensors)) do (A_i, B_i)
+            @tullio new_[m1,m2,n1,n2,σ_next] := A_i[m1,n1,σ,σ_next] * B_i[m2,n2,σ]
+            @cast _[(m1,m2),(n1,n2),σ_next] := new_[m1,m2,n1,n2,σ_next]
         end |> TensorTrain
         
-        # IMPORTANTE: Aplicar swap ANTES de comprimir y normalizar
-        # Crear versión con swap intercambiando configuraciones
-        # Determinar el tipo correcto basado en el primer tensor
-        T_example = B.tensors[1]
-        tensors_mixed = Vector{typeof(T_example)}(undef, length(B.tensors))
+        # Crear B_swap sin deepcopy: solo reindexar cada tensor
+        tensors_swap = [T[:, :, swap_idx] for T in B.tensors]
+        B_swap = TensorTrain(tensors_swap; z = B.z)
         
-        for i in 1:length(B.tensors)
-            # Tensor sin swap
-            T_no_swap = B.tensors[i]
-            
-            # Tensor con swap (intercambiar índices 2↔3 que corresponden a x↔y)
-            T_swap = zeros(eltype(T_no_swap), size(T_no_swap)...)
-            for k in 1:size(T_no_swap, 3)
-                T_swap[:, :, k] = T_no_swap[:, :, swap(k)]
-            end
-            
-            # Combinar: (1-s)*T_no_swap + s*T_swap
-            tensors_mixed[i] = (1-s) * T_no_swap + s * T_swap
-        end
+        # Aplicar factores y sumar
+        B_swap.tensors[1] *= s
+        B.tensors[1] *= (1-s)
+        B = B + B_swap
         
-        B = TensorTrain(tensors_mixed)
-        
-        # Ahora sí comprimir y normalizar
-        compress!(B; svd_trunc=TruncBond(max_bound)) 
+        compress!(B; svd_trunc=TruncBond(max_bound))
         normalize!(B)
-        
-        if save
-            push!(lista_B_T, B)
-        end
+        save && push!(lista_B_T, B)
     end
     
-    if save
-        return lista_B_T
-    else
-        return B
-    end
+    return save ? lista_B_T : B
 end
-
-# Nota: La función swap debe mapear correctamente los índices del producto tensorial
-# Para un estado producto (σ_x, σ_y) con índices:
-# 1 = (-1,-1), 2 = (-1,+1), 3 = (+1,-1), 4 = (+1,+1)
-# El swap intercambia x ↔ y, es decir: 1→1, 2→3, 3→2, 4→4
