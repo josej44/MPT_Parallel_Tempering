@@ -2,6 +2,8 @@
 using TensorTrains, TensorCast, Tullio, LogarithmicNumbers, ProgressMeter, LinearAlgebra
 using TensorTrains: compress, TruncBondThresh  
 
+
+
 # ============================================
 # CONSTRUCCIÓN DEL TENSOR TRAIN DE TRANSICIÓN
 # ============================================
@@ -33,7 +35,7 @@ donde:
 """
 
 function build_transition_tensorchain(transition_rate, params, Q = 2, σ = x -> 2x - 3)
-    N = params.N  # Número de sitios en la cadena
+    N = length(params.h_vector)  # Número de sitios en la cadena
 
     function delta_vector(spin_value)
         return [spin_value == σ(q) ? 1.0 : 0.0 for q in 1:Q]'
@@ -168,22 +170,21 @@ function build_transition_tensorchain(transition_rate, params, Q = 2, σ = x -> 
     return TensorTrain(tensors)
 end
 
-# ============================================
 
 # ============================================================================
 # TENSOR TRAIN DE EVOLUCIÓN DE LA DISTRIBUCIÓN DE PROBABILIDAD
 # ============================================================================
 
 """
-    tensor_b_t(A, P0, t, max_bound) Evoluciona la distribución de probabilidad inicial P0 a través de t 
+    tensor_b_t(A, P0, t, bond) Evoluciona la distribución de probabilidad inicial P0 a través de t 
     pasos de tiempo usando la matriz de transición A en formato TensorTrain.
 # Argumentos
 - `A`: TensorTrain que representa la matriz de transición
 - `P0`: Vector de vectores con la distribución de probabilidad inicial en cada sitio
 - `t`: Número de pasos de tiempo a evolucionar
-- `max_bound`: Límite máximo para la compresión del TensorTrain
+- `bond`: Límite para la compresión del TensorTrain
 """
-function tensor_b_t(A, P0, t, max_bound)
+function tensor_b_t(A, P0, t, bond)
     N = length(A.tensors)               # Define N como la longitud de A.tensors
 
     # Construye el TensorTrain inicial para la distribución P0
@@ -205,7 +206,7 @@ function tensor_b_t(A, P0, t, max_bound)
 
         # Crea el nuevo TensorTrain con los tensores actualizados.
         end |> TensorTrain
-        compress!(B; svd_trunc=TruncBond(max_bound)) 
+        compress!(B; svd_trunc=TruncBond(bond)) 
         normalize!(B)
     end
     
@@ -219,16 +220,16 @@ end
 # ============================================================================================
 
 """
-    tensor_b_t(A, P0, t, max_bound) Evoluciona la distribución de probabilidad inicial P0 a través de t 
+    tensor_b_t(A, P0, t, bond) Evoluciona la distribución de probabilidad inicial P0 a través de t 
     pasos de tiempo usando la matriz de transición A en formato TensorTrain. Devuelve una lista con el 
     TensorTrain de la distribución en cada paso de tiempo.
 # Argumentos
 - `A`: TensorTrain que representa la matriz de transición
 - `P0`: Vector de vectores con la distribución de probabilidad inicial en cada sitio
 - `t`: Número de pasos de tiempo a evolucionar
-- `max_bound`: Límite máximo para la compresión del TensorTrain
+- `bond`: Límite máximo para la compresión del TensorTrain
 """
-function tensor_b_t_over_time(A, P0, t, max_bound)
+function tensor_b_t_over_time(A, P0, t, bond)
     N = length(A.tensors)               # Define N como la longitud de A.tensors
 
     lista_B_T =[]
@@ -252,7 +253,7 @@ function tensor_b_t_over_time(A, P0, t, max_bound)
 
         # Crea el nuevo TensorTrain con los tensores actualizados.
         end |> TensorTrain
-        compress!(B; svd_trunc=TruncBond(max_bound)) 
+        compress!(B; svd_trunc=TruncBond(bond)) 
         normalize!(B)
         push!(lista_B_T, B)
     end
@@ -353,6 +354,33 @@ function transition_rate(sigma_neighbors, sigma_new, site_index, params)
     # Dinámica de Glauber
     return (exp(params.beta * sigma_new * h_eff) / (2 * cosh(params.beta * h_eff)))*(1-params.p0) + params.p0* (sigma_new == sigma_neighbors[site_index == 1 ? 1 : site_index == N ? 2 : 2] ? 1.0 : 0.0)
 end
+
+
+function transition_glauber_rate(sigma_neighbors, sigma_new, site_index, params)
+    N = length(params.h_vector)
+    
+    if site_index == 1
+        # Sitio 1: solo vecino derecho
+        # sigma_neighbors = [σ₁ᵗ, σ₂ᵗ]
+        h_eff = params.j_vector[1] * sigma_neighbors[2] + params.h_vector[1]
+        
+    elseif site_index == N
+        # Sitio N: solo vecino izquierdo
+        # sigma_neighbors = [σₙ₋₁ᵗ, σₙᵗ]
+        h_eff = params.j_vector[end] * sigma_neighbors[1] + params.h_vector[end]
+        
+    else
+        # Sitio intermedio: vecinos izquierdo y derecho
+        # sigma_neighbors = [σᵢ₋₁ᵗ, σᵢᵗ, σᵢ₊₁ᵗ]
+        h_eff = params.j_vector[site_index - 1] * sigma_neighbors[1] + 
+                params.j_vector[site_index] * sigma_neighbors[3] + 
+                params.h_vector[site_index]
+    end
+    
+    # Dinámica de Glauber
+    return (exp(params.beta * sigma_new * h_eff) / (2 * cosh(params.beta * h_eff))) 
+end
+
 
 
 # ============================================================
@@ -457,40 +485,23 @@ end
     
 
 
-swap(i) = (i == 1 ? 1 : i == 2 ? 3 : i == 3 ? 2 : i == 4 ? 4 : error("swap solo definido para i=1..4"))
-
-function swapping_tt(B)
-    for i in 1:length(B.tensors)
-        B_i_new = zeros(size(B.tensors[i])...)
-        for k in 1:4
-            B_i_new[:,:, k] = B.tensors[i][:,:, swap(k)] 
-        end
-        B.tensors[i] = B_i_new
-    end
-    return B
-end
-
-
-
-
-
 # ============================================================================
 # TENSOR TRAIN DE EVOLUCIÓN DE LA DISTRIBUCIÓN DE PROBABILIDAD CON SWAP CON SALVA OPCIONAL
 # ============================================================================
 """
-    tensor_b_t_swap(A, P0, t, max_bound, s, save = true) Evoluciona la distribución de probabilidad inicial P0 a través de t 
+    tensor_b_t_swap(A, P0, t, bond, s, save = true) Evoluciona la distribución de probabilidad inicial P0 a través de t 
     pasos de tiempo usando la matriz de transición A en formato TensorTrain, aplicando un swap con probabilidad s en cada paso.
     Devuelve una lista con el TensorTrain de la distribución en cada paso de tiempo si save es true.
 # Argumentos
 - `A`: TensorTrain que representa la matriz de transición
 - `P0`: Vector de vectores con la distribución de probabilidad inicial en cada sitio
 - `t`: Número de pasos de tiempo a evolucionar
-- `max_bound`: Límite máximo para la compresión del TensorTrain
+- `bond`: Límite máximo para la compresión del TensorTrain
 - `s`: Probabilidad de aplicar el swap en cada paso
 - `save`: Booleano que indica si se guarda la distribución en cada paso
 """
 
-function tensor_b_t_swap(A, P0, t, max_bound, s, save = true)
+function tensor_b_t_swap(A, P0, t, bond, s, save = true)
     B = TensorTrain([(@tullio _[1,1,x] := pi[x]) for pi in P0])
     lista_B_T = save ? [B] : nothing
     swap_idx = [1, 3, 2, 4]
@@ -511,10 +522,48 @@ function tensor_b_t_swap(A, P0, t, max_bound, s, save = true)
         B.tensors[1] *= (1-s)
         B = B + B_swap
         
-        compress!(B; svd_trunc=TruncBond(max_bound))
+        compress!(B; svd_trunc=TruncBond(bond))
         normalize!(B)
         save && push!(lista_B_T, B)
     end
     
     return save ? lista_B_T : B
 end
+
+
+
+
+
+
+
+#swap(i) = (i == 1 ? 1 : i == 2 ? 3 : i == 3 ? 2 : i == 4 ? 4 : error("swap solo definido para i=1..4"))
+
+
+# function doble_tensor_b_t_tplus_swap(A, B, bond, s)
+#     swap_A_idx = [1,2,3,4, 9,10,11,12, 5,6,7,8, 13,14,15,16]
+    
+#     # Crear B_swap sin deepcopy: solo reindexar cada tensor
+#     tensors_A_swap = [T[:, :, swap_A_idx] for T in A.tensors]
+#     A_swap = TensorTrain(tensors_A_swap; z = A.z) 
+    
+#     # Evolución temporal
+#     B_ = map(zip(A.tensors, B.tensors)) do (A_i, B_i)
+#         @tullio new_[m1,m2,n1,n2,σ, σ_next] := A_i[m1,n1,σ,σ_next] * B_i[m2,n2,σ]
+#         @cast _[(m1,m2),(n1,n2),(σ,σ_next)] := new_[m1,m2,n1,n2,σ,σ_next]
+#     end |> TensorTrain
+
+#     B_swap = map(zip(A_swap.tensors, B.tensors)) do (A_i, B_i)
+#         @tullio new_[m1,m2,n1,n2,σ, σ_next] := A_i[m1,n1,σ,σ_next] * B_i[m2,n2,σ]
+#         @cast _[(m1,m2),(n1,n2),(σ, σ_next)] := new_[m1,m2,n1,n2,σ, σ_next]
+#     end |> TensorTrain
+    
+#     # Aplicar factores y sumar
+#     B_swap.tensors[1] *= s
+#     B_.tensors[1] *= (1-s)
+#     B = B_ + B_swap
+    
+#     compress!(B; svd_trunc=TruncBond(bond))
+#     normalize!(B)
+    
+#     return B
+# end

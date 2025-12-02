@@ -2,6 +2,7 @@
 using TensorTrains, TensorCast, Tullio, LogarithmicNumbers, ProgressMeter, LinearAlgebra
 using TensorTrains: compress, TruncBondThresh  
 
+include("tensor_builder.jl")
 
 
 # It works for both, simple and parallel systems
@@ -66,6 +67,9 @@ function full_marginals_system(B, full_subprod_system = 1, full_system_already_c
 end
 
 
+# Just for simple systems
+
+full_simple_ev_system(B) = [p[2] - p[1] for p in full_marginals_system(B) ]
 
 
 # Just for parallel systems
@@ -133,6 +137,15 @@ function full_second_order_marginals_system(B, full_subprod_system = 1, full_sys
 end
 
 
+# Just for simple systems
+
+"""
+    Calculate the correlated moment of each pair of consecutives spins. 
+    Return a vector with N-1 pairs, each pair j is the correlated moment of the pair (j,j+1) 
+    in both chains.
+"""
+
+correlation_next_pairs_simple(bt) = [ p[1] + p[4] - p[2] - p[3] for p in full_second_order_marginals_system(bt) ]
 
 
 # Just for parallel systems
@@ -184,15 +197,14 @@ function correlation_between_spins_system(second_moments_system, expected_values
         second_moment = second_moments_system[k]
         expected_value_1 = expected_values_system[k][1]
         expected_value_2 = expected_values_system[k+1][1]
-        corr_ch_1 = (second_moment[1] - expected_value_1 * expected_value_2) / (sqrt(1 - expected_value_1^2) * sqrt(1 - expected_value_2^2))
+        corr_ch_1 = (second_moment[1] - expected_value_1 * expected_value_2) / (sqrt(abs(1 - expected_value_1^2)) * sqrt(abs(1 - expected_value_2^2)))
         expected_value_1 = expected_values_system[k][2]
         expected_value_2 = expected_values_system[k+1][2]
-        corr_ch_2 = (second_moment[2] - expected_value_1 * expected_value_2) / (sqrt(1 - expected_value_1^2) * sqrt(1 - expected_value_2^2))
+        corr_ch_2 = (second_moment[2] - expected_value_1 * expected_value_2) / (sqrt(abs(1 - expected_value_1^2)) * sqrt(abs(1 - expected_value_2^2)))
         push!(correlations, (corr_ch_1, corr_ch_2))
     end
     return correlations
 end
-
 
 
 
@@ -220,6 +232,33 @@ function energy_function(full_expected_values, full_second_moments, params)
     return (energy_1, energy_2)
 end
 
+
+# Just for simple systems
+
+"""
+    energy_function(full_expected_values, full_second_moments, params)
+Calculate the expected energy of both chains from the marginal expected values and
+second order, along with the system parameters.
+"""
+
+function energy_function_simple(bt, params)
+    bb = full_subproducts_system(bt)
+    second_marg = full_second_order_marginals_system(bt, bb, true)
+    first_marg = full_marginals_system(bt, bb, true)
+
+    full_ev_system =  [p[2] - p[1] for p in first_marg ]
+    correlation_next_pairs = [ p[1] + p[4] - p[2] - p[3] for p in second_marg ]
+    energy_1 = 0.0
+    h_vector = params.h_vector
+    j_vector = params.j_vector
+    for k in 1:length(h_vector)
+        energy_1 += -h_vector[k] * full_ev_system[k][1]
+        if k < length(h_vector)
+            energy_1 += -j_vector[k] * correlation_next_pairs[k][1]
+        end
+    end
+    return energy_1
+end
 
 
 
@@ -296,3 +335,61 @@ function system_description_over_time(B_t, params)
     end
     return observables_over_time
 end
+
+
+
+
+
+
+
+
+
+# ##########################################################################
+# # Two times observables 
+# ##########################################################################
+
+
+
+# # # Just for parallel systems
+
+# # """
+# #     Calculate the correlation between two spins (not_necessarily in the same tensor). 
+# #     Return a vector with N-1 pairs, each pair j is the correlation of the pair (j,j+1) 
+# #     in both chains.
+# # """
+
+# function correlation_between_spins_system(A, B, bond, s)
+#     B_t_tplus = doble_tensor_b_t_tplus_swap(A, B, bond, s)
+#     correlations = []
+#     for k in 1:N-1
+#         second_moment = second_moments_system[k]
+#         expected_value_1 = expected_values_system[k][1]
+#         expected_value_2 = expected_values_system[k+1][1]
+#         corr_ch_1 = (second_moment[1] - expected_value_1 * expected_value_2) / (sqrt(1 - expected_value_1^2) * sqrt(1 - expected_value_2^2))
+#         expected_value_1 = expected_values_system[k][2]
+#         expected_value_2 = expected_values_system[k+1][2]
+#         corr_ch_2 = (second_moment[2] - expected_value_1 * expected_value_2) / (sqrt(1 - expected_value_1^2) * sqrt(1 - expected_value_2^2))
+#         push!(correlations, (corr_ch_1, corr_ch_2))
+#     end
+#     return correlations
+# end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

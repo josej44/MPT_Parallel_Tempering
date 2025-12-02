@@ -95,7 +95,7 @@ function marginal_ev_system_inef(B)
     N = length(B.tensors)
     expected_values = zeros(N)
     for k in 1:N
-        expected_values[k] = marginal_expected_value(B, k)
+        expected_values[k] = marginal_expected_value_simple(B, k)
     end
     return expected_values
 end
